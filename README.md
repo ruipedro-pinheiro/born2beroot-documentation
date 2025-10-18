@@ -6,97 +6,124 @@ Projet 42 Lausanne : Configuration et sécurisation d'un serveur Debian sous Vir
 
 Born2beroot est un projet d'administration système visant à configurer un environnement serveur sécurisé depuis zéro. Le projet ne peut pas être uploadé sur GitHub car il s'agit d'une machine virtuelle (.vdi), mais cette documentation retrace les étapes et compétences acquises.
 
-## Objectifs du projet
+## Choix de la distribution
 
-- Installer et configurer Debian sur une machine virtuelle
-- Mettre en place un partitionnement LVM chiffré
-- Configurer SSH avec sécurité renforcée
-- Implémenter un pare-feu (UFW)
-- Établir une politique de mots de passe stricte
-- Configurer sudo avec restrictions
-- Créer un script de monitoring système
+**Debian** choisi plutôt que Rocky Linux pour plusieurs raisons :
+- Familiarité avec l'environnement Debian
+- Configuration LVM plus accessible pour un premier projet sysadmin
+- AppArmor plus simple que SELinux pour débuter
 
-## Configuration réalisée
+### AppArmor vs SELinux
+- **AppArmor** (Debian/Ubuntu) : Utilise des profils liés aux répertoires des programmes
+- **SELinux** (RHEL) : Plus strict, basé sur des security policies. Si aucune policy n'existe pour un programme, celui-ci n'aura aucune permission
 
-### Partitionnement LVM
-- Partition boot séparée
-- Volumes logiques chiffrés (root, swap, home, var, tmp)
-- Gestion LVM pour flexibilité
+## Partitionnement LVM détaillé
+
+### Structure créée
+1. **Partition /boot** : 524MB (non chiffrée, nécessaire pour le boot)
+2. **Partition principale** : Reste de l'espace (chiffrée avec LUKS)
+   - Nom du volume chiffré : `sda5_crypt`
+   - Volume Group : `LVMGroup`
+
+### Volumes logiques dans la partition chiffrée
+- root
+- swap
+- home
+- var
+- srv
+- tmp
+- var-log
+
+### Étapes de création
+1. Créer partition /boot (524MB, recommandation Debian)
+2. Créer partition principale (reste de l'espace)
+3. Chiffrer la partition avec LUKS (mot de passe de déchiffrement au boot)
+4. Créer le Volume Group LVM dans la partition chiffrée
+5. Nommer le groupe "LVMGroup"
+6. Créer les volumes logiques selon la structure demandée
+7. Monter les volumes et assigner les mount points (filesystem ext4)
+
+## Configuration système
 
 ### Sécurité SSH
-- Port personnalisé (non-standard)
-- Authentification par clé publique
-- Désactivation du login root
-- Configuration stricte des permissions
+- Port personnalisé (4242)
+- Désactivation du login root (`PermitRootLogin no`)
+- Configuration dans `/etc/ssh/sshd_config`
 
 ### Pare-feu UFW
-- Règles entrantes/sortantes configurées
-- Ports autorisés : SSH uniquement
-- Politique par défaut : deny all
+```bash
+ufw enable
+ufw allow 4242
+ufw status
+```
 
 ### Politique de mots de passe
-- Longueur minimale : 10 caractères
-- Expiration : 30 jours
-- Avertissement avant expiration
-- Complexité requise (majuscules, minuscules, chiffres)
+Fichiers modifiés :
+- `/etc/login.defs` : Expiration, durée de validité
+- `/etc/pam.d/common-password` : Complexité (minuscules, majuscules, chiffres, longueur min 10)
 
 ### Configuration sudo
-- Log de toutes les commandes
-- Limitation des tentatives
-- Messages personnalisés
-- TTY obligatoire
-- Chemins sécurisés
+Fichier `/etc/sudoers.d/sudo_config` :
+- Log de toutes les commandes sudo dans `/var/log/sudo/`
+- Limitation à 3 tentatives (`Defaults passwd_tries=3`)
+- Messages personnalisés en cas d'erreur
+- TTY obligatoire (`Defaults requiretty`)
+- Restriction des chemins sécurisés (`Defaults secure_path`)
 
 ### Script de monitoring
-Script bash affichant toutes les 10 minutes :
-- Architecture OS et version kernel
+Script bash (`/usr/local/bin/monitoring.sh`) diffusant via `wall` toutes les 10 minutes :
+- Architecture OS et kernel
 - CPU physiques/virtuels
-- RAM utilisée/disponible
-- Disque utilisé/disponible
+- RAM/Disque utilisés
 - % utilisation CPU
 - Dernier boot
-- LVM actif
-- Connexions TCP actives
+- LVM actif (oui/non)
+- Connexions TCP
 - Utilisateurs connectés
-- Adresse IP et MAC
-- Nombre de commandes sudo exécutées
+- IP et MAC
+- Nombre de commandes sudo
 
-## Commandes clés utilisées
+Configuration cron : `*/10 * * * * /usr/local/bin/monitoring.sh`
+
+## Commandes clés
 ```bash
-# LVM
+# Vérification LVM
 lsblk
 vgdisplay
 lvdisplay
 
-# Utilisateurs et groupes
+# Gestion utilisateurs
+useradd -m username
 usermod -aG sudo username
 getent group sudo
 
 # SSH
 systemctl status ssh
-nano /etc/ssh/sshd_config
+systemctl restart ssh
 
-# UFW
-ufw status
-ufw allow 4242
+# AppArmor
+aa-status
 
-# Monitoring
-wall < monitoring.sh
+# Hostname
+hostnamectl set-hostname new-hostname
+
+# Cron
 crontab -e
 ```
 
 ## Compétences acquises
 
-- Administration système Linux
-- Gestion LVM et partitionnement
-- Sécurisation serveur
-- Configuration SSH
-- Pare-feu et réseau
-- Scripting bash
-- Gestion utilisateurs et permissions
-- Politiques de sécurité
+- Administration système Linux (Debian)
+- Partitionnement LVM avec chiffrement LUKS
+- Sécurisation serveur SSH
+- Configuration pare-feu UFW
+- AppArmor (MAC - Mandatory Access Control)
+- Politiques de sécurité PAM
+- Scripting bash système
+- Gestion utilisateurs/groupes
+- Cron et automatisation
 
 ## Projet 42
 
 Réalisé dans le cadre du cursus de 42 Lausanne.
-Score : [ton score]/100 (si validé)
+Score : A valider
