@@ -21,17 +21,16 @@ Born2beroot est un projet d'administration système visant à configurer un envi
 
 ### Structure créée
 ```
-sda (15GB)
+sda (30GB recommandé pour bonus)
 ├─sda1 (boot, 524MB, non chiffrée)
 ├─sda2 (extended)
-├─sda3 (5GB, ajoutée pour extension)
 └─sda5 (partition principale chiffrée LUKS)
   └─sda5_crypt
     └─LVMGroup (Volume Group)
       ├─root (10GB)
       ├─swap (2.5GB)
       ├─home (5GB)
-      ├─var (8.5GB) ← étendu depuis 3GB
+      ├─var (3GB)
       ├─srv (3GB)
       ├─tmp (3GB)
       └─var-log (4GB)
@@ -46,33 +45,27 @@ sda (15GB)
 6. Créer les volumes logiques selon la structure demandée
 7. Monter les volumes et assigner les mount points (filesystem ext4)
 
-### Extension du volume /var (post-installation)
+### Extension de volumes logiques
 
-Lorsque l'espace disque devient insuffisant :
+Principe de l'extension d'un volume logique avec LVM :
 
 ```bash
-# 1. Étendre le disque VirtualBox (via l'interface GUI)
-# 2. Créer nouvelle partition avec l'espace libre
-sudo fdisk /dev/sda
-# n -> p -> 3 -> Enter -> Enter -> t -> 3 -> 8e -> w
+# 1. Ajouter un nouveau Physical Volume
+sudo pvcreate /dev/sdaX
 
-# 3. Recharger la table de partitions
-sudo partprobe
+# 2. Étendre le Volume Group
+sudo vgextend VGname /dev/sdaX
 
-# 4. Créer Physical Volume
-sudo pvcreate /dev/sda3
+# 3. Étendre le Logical Volume
+sudo lvextend -L +XG /dev/VGname/LVname
+# ou utiliser tout l'espace libre :
+sudo lvextend -l +100%FREE /dev/VGname/LVname
 
-# 5. Étendre le Volume Group
-sudo vgextend LVMGroup /dev/sda3
+# 4. Redimensionner le filesystem
+sudo resize2fs /dev/VGname/LVname
 
-# 6. Étendre le Logical Volume
-sudo lvextend -l +100%FREE /dev/LVMGroup/var
-
-# 7. Redimensionner le filesystem
-sudo resize2fs /dev/LVMGroup/var
-
-# 8. Vérifier
-df -h | grep var
+# 5. Vérifier
+df -h
 ```
 
 ## Configuration système
@@ -393,15 +386,17 @@ sudo chmod a-w /home/ftpuser
 
 ## Export de la VM
 
-**Méthode recommandée : Export OVA**
-1. Éteindre la VM complètement
-2. VirtualBox → Fichier → Exporter un appareil virtuel
-3. Sélectionner la VM → Format OVA
-4. Importer sur une autre machine via "Importer un appareil virtuel"
+Pour transférer la VM entre machines :
 
-**Alternative : Copier le .vdi**
-- Fichier généralement dans `/sgoinfre/goinfre/Perso/login/`
-- Créer nouvelle VM et attacher le .vdi existant
+**Méthode 1 : Export OVA (recommandé)**
+- VirtualBox → Fichier → Exporter un appareil virtuel
+- Format : OVA (Open Virtualization Format)
+- Import : Fichier → Importer un appareil virtuel
+
+**Méthode 2 : Copier le fichier .vdi**
+- Localiser le fichier .vdi du disque virtuel
+- Copier sur la nouvelle machine
+- Créer une VM et attacher le .vdi existant
 
 ## Génération de la signature
 
@@ -413,7 +408,7 @@ sha1sum Born2beroot.vdi > signature.txt
 certUtil -hashfile Born2beroot.vdi sha1 > signature.txt
 ```
 
-**Important** : Prendre un snapshot avant chaque évaluation et regénérer la signature si modifications.
+La signature permet de vérifier l'intégrité du fichier .vdi lors de l'évaluation.
 
 ## Compétences acquises
 
