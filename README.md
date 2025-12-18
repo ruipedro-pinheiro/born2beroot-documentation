@@ -1,30 +1,30 @@
-# Born2beroot - Configuration serveur Debian
+# Born2beroot - System Administration & Virtualization
 
-Projet 42 Lausanne : Configuration et sécurisation d'un serveur Debian sous VirtualBox.
+**Score:** 125/100 (with bonus)
 
-## Description
+## About
 
-Born2beroot est un projet d'administration système visant à configurer un environnement serveur sécurisé depuis zéro. Le projet ne peut pas être uploadé sur GitHub car il s'agit d'une machine virtuelle (.vdi), mais cette documentation retrace les étapes et compétences acquises.
+Born2beroot is the first system administration project at 42. The goal is to set up a secure server environment from scratch using a Virtual Machine — strict partitioning with LVM, firewall configuration, strong password policies, and system monitoring.
 
-## Choix de la distribution
+*Note: Since the project result is a binary VM file (.vdi), this repository contains documentation and scripts, not the VM itself.*
 
-**Debian** choisi plutôt que Rocky Linux pour plusieurs raisons :
-- Familiarité avec l'environnement Debian
-- Configuration LVM plus accessible pour un premier projet sysadmin
-- AppArmor plus simple que SELinux pour débuter
+## OS Choice: Rocky vs Debian
+
+I initially leaned towards **Rocky Linux** — I wanted to explore the Red Hat ecosystem (RHEL), widely used in enterprise. I was already comfortable with Debian/Ubuntu from daily use, so Rocky seemed like a better learning opportunity.
+
+However, I hit a roadblock: creating a partition without a mount point proved difficult with Rocky's installer. Combined with difficulty matching the specific bonus requirements, I switched back to **Debian**.
 
 ### AppArmor vs SELinux
-- **AppArmor** (Debian/Ubuntu) : Utilise des profils liés aux répertoires des programmes
-- **SELinux** (RHEL) : Plus strict, basé sur des security policies. Si aucune policy n'existe pour un programme, celui-ci n'aura aucune permission
+- **AppArmor** (Debian/Ubuntu): Uses profiles linked to program directories
+- **SELinux** (RHEL): Stricter, based on security policies. If no policy exists for a program, it has no permissions
 
-## Partitionnement LVM détaillé
+## LVM Partitioning Structure
 
-### Structure créée
 ```
-sda (30GB recommandé pour bonus)
-├─sda1 (boot, 524MB, non chiffrée)
+sda (30GB recommended for bonus)
+├─sda1 (boot, 524MB, unencrypted)
 ├─sda2 (extended)
-└─sda5 (partition principale chiffrée LUKS)
+└─sda5 (main encrypted partition - LUKS)
   └─sda5_crypt
     └─LVMGroup (Volume Group)
       ├─root (10GB)
@@ -36,85 +36,76 @@ sda (30GB recommandé pour bonus)
       └─var-log (4GB)
 ```
 
-### Étapes de création
-1. Créer partition /boot (524MB, recommandation Debian)
-2. Créer partition principale (reste de l'espace)
-3. Chiffrer la partition avec LUKS (mot de passe de déchiffrement au boot)
-4. Créer le Volume Group LVM dans la partition chiffrée
-5. Nommer le groupe "LVMGroup"
-6. Créer les volumes logiques selon la structure demandée
-7. Monter les volumes et assigner les mount points (filesystem ext4)
+**Mistake learned:** I initially undersized the partitions (<1GB). This came back to bite me during the bonus when installing WordPress, forcing me to extend logical volumes on a live system.
 
-### Extension de volumes logiques
-
-Principe de l'extension d'un volume logique avec LVM :
+### LVM Extension
 
 ```bash
-# 1. Ajouter un nouveau Physical Volume
+# Add a new Physical Volume
 sudo pvcreate /dev/sdaX
 
-# 2. Étendre le Volume Group
+# Extend the Volume Group
 sudo vgextend VGname /dev/sdaX
 
-# 3. Étendre le Logical Volume
+# Extend the Logical Volume
 sudo lvextend -L +XG /dev/VGname/LVname
-# ou utiliser tout l'espace libre :
+# or use all free space:
 sudo lvextend -l +100%FREE /dev/VGname/LVname
 
-# 4. Redimensionner le filesystem
+# Resize the filesystem
 sudo resize2fs /dev/VGname/LVname
 
-# 5. Vérifier
+# Verify
 df -h
 ```
 
-## Configuration système
+## Security Configuration
 
-### Sécurité SSH
-- Port personnalisé (4242)
-- Désactivation du login root (`PermitRootLogin no`)
-- Configuration dans `/etc/ssh/sshd_config`
+### SSH
+- **Port:** Changed to `4242` (avoid default port scanning)
+- **Root Login:** Disabled (`PermitRootLogin no`)
+- **Config:** `/etc/ssh/sshd_config`
 
 ```bash
-# Vérifier SSH
 sudo systemctl status ssh
 sudo ss -tulpn | grep :4242
 ```
 
-### Pare-feu UFW
+### UFW Firewall
+
 ```bash
 sudo ufw enable
 sudo ufw allow 4242
 sudo ufw status numbered
-sudo ufw delete [number]  # Pour supprimer une règle
+sudo ufw delete [number]
 ```
 
-### Politique de mots de passe
+### Password Policy
 
-**Fichier `/etc/login.defs`** (expiration) :
+**`/etc/login.defs`** (expiration):
 ```
 PASS_MAX_DAYS 30
 PASS_MIN_DAYS 2
 PASS_WARN_AGE 7
 ```
 
-**Fichier `/etc/pam.d/common-password`** (complexité) :
+**`/etc/pam.d/common-password`** (complexity):
 ```
 password requisite pam_pwquality.so retry=3 minlen=10 ucredit=-1 dcredit=-1 maxrepeat=3 reject_username difok=7 enforce_for_root
 ```
 
-Appliquer aux utilisateurs existants :
+Apply to existing users:
 ```bash
 sudo chage -M 30 -m 2 -W 7 username
-sudo chage -l username  # Vérifier
+sudo chage -l username  # Verify
 ```
 
-### Configuration sudo
+### Sudo Configuration
 
-**Fichier `/etc/sudoers.d/sudo_config`** :
+**`/etc/sudoers.d/sudo_config`**:
 ```
 Defaults passwd_tries=3
-Defaults badpass_message="Mot de passe incorrect. Réessayez."
+Defaults badpass_message="Wrong password. Try again."
 Defaults logfile="/var/log/sudo/sudo.log"
 Defaults log_input, log_output
 Defaults iolog_dir="/var/log/sudo"
@@ -122,48 +113,32 @@ Defaults requiretty
 Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
 ```
 
-Vérifier les logs :
-```bash
-sudo cat /var/log/sudo/sudo.log
-```
+## Monitoring Script
 
-### Script de monitoring
+Script at `/usr/local/bin/monitoring.sh` broadcasts via `wall` every 10 minutes:
+- OS Architecture and kernel (`uname -a`)
+- Physical/virtual CPUs (`nproc`, `/proc/cpuinfo`)
+- RAM usage (`free`)
+- Disk usage (`df`)
+- CPU load (`top`)
+- Last boot (`who -b`)
+- LVM active (`lsblk | grep lvm`)
+- TCP connections (`ss -t`)
+- Connected users (`users`)
+- IP and MAC (`hostname -I`, `ip link`)
+- Sudo commands count (`journalctl _COMM=sudo`)
 
-**Script `/usr/local/bin/monitoring.sh`** diffusant via `wall` toutes les 10 minutes :
-- Architecture OS et kernel (`uname -a`)
-- CPU physiques/virtuels (`nproc`, `/proc/cpuinfo`)
-- RAM utilisée (`free`)
-- Disque utilisé (`df`)
-- % utilisation CPU (`top`)
-- Dernier boot (`who -b`)
-- LVM actif (`lsblk | grep lvm`)
-- Connexions TCP établies (`ss -t`)
-- Utilisateurs connectés (`users`)
-- IP et MAC (`hostname -I`, `ip link`)
-- Nombre de commandes sudo (`journalctl _COMM=sudo`)
-
-**Configuration cron** :
+**Cron configuration:**
 ```bash
 sudo crontab -e
-# Ajouter :
+# Add:
 */10 * * * * /usr/local/bin/monitoring.sh
 ```
 
-Tester le script :
-```bash
-sudo /usr/local/bin/monitoring.sh
-```
+## Bonus: WordPress & Lighttpd
 
-Arrêter temporairement :
-```bash
-sudo systemctl stop cron
-```
+### Installation
 
-## Partie Bonus
-
-### WordPress avec Lighttpd, MariaDB, PHP
-
-**Installation des services** :
 ```bash
 sudo apt install lighttpd mariadb-server php-cgi php-mysql
 sudo lighttpd-enable-mod fastcgi
@@ -171,7 +146,8 @@ sudo lighttpd-enable-mod fastcgi-php
 sudo systemctl restart lighttpd
 ```
 
-**Configuration MariaDB** :
+### MariaDB Setup
+
 ```bash
 sudo mysql_secure_installation
 sudo mysql
@@ -183,7 +159,8 @@ FLUSH PRIVILEGES;
 EXIT;
 ```
 
-**Installation WordPress** :
+### WordPress Setup
+
 ```bash
 cd /var/www/html
 sudo wget https://wordpress.org/latest.tar.gz
@@ -192,254 +169,73 @@ sudo chown -R www-data:www-data wordpress/
 sudo chmod -R 755 wordpress/
 ```
 
-**Configuration `wp-config.php`** :
-```php
-define('DB_NAME', 'wpdb');
-define('DB_USER', 'wpuser');
-define('DB_PASSWORD', 'password');
-define('DB_HOST', 'localhost');
-```
+## Bonus: FTP Server (vsftpd)
 
-Accès : `http://localhost:8080/wordpress` (avec port forwarding VirtualBox)
+**Why FTP?** Classic network service for file transfers, complements the web stack, simple but complete configuration.
 
-### Service bonus : Serveur FTP (vsftpd)
-
-**Installation** :
 ```bash
 sudo apt install vsftpd
 sudo systemctl enable vsftpd
-sudo systemctl start vsftpd
 ```
 
-**Configuration `/etc/vsftpd.conf`** :
+**`/etc/vsftpd.conf`**:
 ```bash
-# Désactiver connexion anonyme
 anonymous_enable=NO
-
-# Autoriser utilisateurs locaux
 local_enable=YES
-
-# Permettre l'écriture
 write_enable=YES
-
-# Emprisonner utilisateurs dans leur home
 chroot_local_user=YES
-
-# Messages de bienvenue
-ftpd_banner=Bienvenue sur le serveur FTP Born2beroot
-
-# Ports passifs (pour pare-feu)
+ftpd_banner=Welcome to Born2beroot FTP
 pasv_enable=YES
 pasv_min_port=40000
 pasv_max_port=40100
-
-# Logging
 xferlog_enable=YES
-xferlog_file=/var/log/vsftpd.log
 ```
 
-**Configuration UFW** :
 ```bash
 sudo ufw allow 21/tcp
 sudo ufw allow 40000:40100/tcp
-sudo ufw reload
 ```
 
-**Créer un utilisateur FTP** :
+## Quick Reference
+
+### LVM
 ```bash
-sudo adduser ftpuser
-sudo usermod -d /var/ftp ftpuser
-sudo mkdir -p /var/ftp
-sudo chown ftpuser:ftpuser /var/ftp
-```
-
-**Redémarrer le service** :
-```bash
-sudo systemctl restart vsftpd
-sudo systemctl status vsftpd
-```
-
-**Tester la connexion** :
-```bash
-ftp localhost 21
-# Username: ftpuser
-# Password: [mot de passe]
-```
-
-**Justification du choix FTP** :
-- Service réseau traditionnel essentiel en administration système
-- Permet le transfert de fichiers entre machines
-- Configuration simple mais complète (chroot, logs, sécurité)
-- Complémentaire au stack web (WordPress)
-- Utile pour déploiement de fichiers sur le serveur
-
-## Commandes clés pour la défense
-
-### Système et virtualisation
-```bash
-uname -a                    # Kernel et architecture
-hostnamectl                 # Hostname et OS
-hostnamectl set-hostname X  # Changer hostname
-```
-
-### LVM et partitions
-```bash
-lsblk                       # Arborescence des disques
+lsblk                       # Disk tree
 sudo pvdisplay              # Physical Volumes
 sudo vgdisplay              # Volume Groups
 sudo lvdisplay              # Logical Volumes
-df -h                       # Espace disque utilisé
 ```
 
-### Utilisateurs et groupes
+### Users
 ```bash
-sudo adduser username       # Créer utilisateur
-sudo userdel -r username    # Supprimer utilisateur
-sudo usermod -aG group user # Ajouter au groupe
-groups username             # Voir groupes d'un user
-getent group groupname      # Membres d'un groupe
-id username                 # Info complète user
-sudo chage -l username      # Politique mot de passe
-```
-
-### Sudo
-```bash
-sudo visudo                         # Éditer sudoers
-sudo cat /var/log/sudo/sudo.log    # Voir logs sudo
-```
-
-### SSH
-```bash
-sudo systemctl status ssh
-sudo systemctl restart ssh
-sudo cat /etc/ssh/sshd_config
-ssh username@localhost -p 4242
-```
-
-### UFW
-```bash
-sudo ufw status numbered
-sudo ufw allow port
-sudo ufw delete number
-```
-
-### AppArmor
-```bash
-sudo aa-status              # Statut AppArmor
+sudo adduser username
+sudo userdel -r username
+sudo usermod -aG group user
+groups username
 ```
 
 ### Services
 ```bash
-sudo systemctl status service_name
-sudo systemctl start|stop|restart service_name
-sudo systemctl enable|disable service_name
+sudo systemctl status/start/stop/restart service_name
+sudo systemctl enable/disable service_name
 ```
 
-### Cron
-```bash
-sudo crontab -l             # Lister cron jobs
-sudo crontab -e             # Éditer cron jobs
-sudo systemctl stop cron    # Arrêter cron temporairement
-```
+## Skills Acquired
 
-### FTP
-```bash
-sudo systemctl status vsftpd
-sudo cat /etc/vsftpd.conf
-ftp localhost 21
-```
-
-## Troubleshooting
-
-### MariaDB ne démarre pas après extension de /var
-
-**Symptômes** : `mariadb.service failed`, erreurs de permissions
-
-**Solution** :
-```bash
-sudo systemctl stop mariadb
-sudo chown -R mysql:mysql /var/lib/mysql
-sudo chmod 750 /var/lib/mysql
-sudo systemctl start mariadb
-```
-
-Si échec, réinitialiser :
-```bash
-sudo rm -rf /var/lib/mysql/*
-sudo mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql
-sudo chown -R mysql:mysql /var/lib/mysql
-sudo systemctl start mariadb
-```
-
-### WordPress "Error establishing database connection"
-
-Vérifier `/var/www/html/wordpress/wp-config.php` :
-- DB_NAME, DB_USER, DB_PASSWORD correspondent à MariaDB
-- Permissions : `sudo chown -R www-data:www-data wordpress/`
-
-### vsftpd : 500 OOPS: vsftpd: refusing to run with writable root
-
-Solution :
-```bash
-sudo chmod a-w /home/ftpuser
-```
-
-## Export de la VM
-
-Pour transférer la VM entre machines :
-
-**Méthode 1 : Export OVA (recommandé)**
-- VirtualBox → Fichier → Exporter un appareil virtuel
-- Format : OVA (Open Virtualization Format)
-- Import : Fichier → Importer un appareil virtuel
-
-**Méthode 2 : Copier le fichier .vdi**
-- Localiser le fichier .vdi du disque virtuel
-- Copier sur la nouvelle machine
-- Créer une VM et attacher le .vdi existant
-
-## Génération de la signature
-
-```bash
-# Sur Linux/Mac
-sha1sum Born2beroot.vdi > signature.txt
-
-# Sur Windows
-certUtil -hashfile Born2beroot.vdi sha1 > signature.txt
-```
-
-La signature permet de vérifier l'intégrité du fichier .vdi lors de l'évaluation.
-
-## Compétences acquises
-
-- Administration système Linux (Debian)
-- Partitionnement LVM avec chiffrement LUKS
-- Extension de volumes logiques LVM
-- Sécurisation serveur SSH
-- Configuration pare-feu UFW
-- AppArmor (MAC - Mandatory Access Control)
-- Politiques de sécurité PAM
-- Configuration sudo avancée
-- Scripting bash système
-- Gestion utilisateurs/groupes
-- Cron et automatisation
-- Installation et configuration LAMP (Lighttpd, MariaDB, PHP)
-- Déploiement WordPress
-- Configuration serveur FTP (vsftpd)
-- Troubleshooting services Linux
-
-## Ressources
-
-- [Documentation Debian](https://www.debian.org/doc/)
-- [LVM HOWTO](https://tldp.org/HOWTO/LVM-HOWTO/)
-- [Arch Wiki - SSH](https://wiki.archlinux.org/title/OpenSSH)
-- [UFW Documentation](https://help.ubuntu.com/community/UFW)
-- [vsftpd Documentation](https://security.appspot.com/vsftpd.html)
-
-## Projet 42
-
-Réalisé dans le cadre du cursus de 42 Lausanne.
+- Linux system administration (Debian)
+- LVM partitioning with LUKS encryption
+- SSH security configuration
+- UFW firewall
+- AppArmor (MAC)
+- PAM security policies
+- Advanced sudo configuration
+- Bash scripting
+- User/group management
+- Cron automation
+- LAMP stack (Lighttpd, MariaDB, PHP)
+- WordPress deployment
+- FTP server configuration
 
 ---
 
-*Note : Ce README documente le processus et les compétences acquises. La VM elle-même n'est pas versionnée sur GitHub en raison de sa nature binaire (.vdi).*
+*Project developed at 42 Lausanne*
